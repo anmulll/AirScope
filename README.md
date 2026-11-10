@@ -67,6 +67,22 @@ Proyek ini bertujuan mengimplementasikan tiga konsep utama pemrograman mobile:
 
 AirScope menggunakan dua endpoint utama dari Open-Meteo.
 
+
+## Data Attribution
+
+Air quality information is provided by Open-Meteo.
+
+The air quality forecasts are based on atmospheric
+composition models from the Copernicus Atmosphere
+Monitoring Service (CAMS).
+
+AirScope displays model-based air quality information
+and does not represent direct measurements from
+physical monitoring stations.
+
+Data source:
+https://open-meteo.com/
+
 ### 1. Geocoding API
 
 Digunakan untuk mengubah nama kota menjadi koordinat geografis.
@@ -219,9 +235,9 @@ build/app/outputs/flutter-apk/app-release.apk
 
 ## Developer Information
 
-Name: [Nama Mahasiswa]
+Name: Muh. An'amullah A.
 
-NIM: [NIM]
+NIM: D121241032
 
 Course: Pemrograman Mobile
 
