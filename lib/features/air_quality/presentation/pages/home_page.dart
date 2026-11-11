@@ -10,6 +10,7 @@ import '../widgets/city_search_result_tile.dart';
 import 'package:airscope/features/air_quality/domain/models/air_quality_data.dart';
 
 import '../widgets/air_quality_summary_card.dart';
+import '../widgets/air_quality_error_card.dart';
 
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
@@ -31,6 +32,7 @@ class _HomePageState extends State<HomePage> {
 
   bool _isSearching = false;
   bool _hasSearched = false;
+  bool _canRetrySearch = false;
 
   String? _searchError;
 
@@ -40,9 +42,12 @@ class _HomePageState extends State<HomePage> {
     if (query.length < 2) {
       setState(() {
         _searchError = 'Masukkan minimal 2 karakter untuk mencari kota.';
+
         _searchResults = [];
         _hasSearched = false;
+        _canRetrySearch = false;
       });
+
       return;
     }
 
@@ -55,6 +60,7 @@ class _HomePageState extends State<HomePage> {
       _searchResults = [];
       _selectedCity = null;
       _airQualityFuture = null;
+      _canRetrySearch = false;
     });
 
     try {
@@ -64,24 +70,30 @@ class _HomePageState extends State<HomePage> {
 
       setState(() {
         _searchResults = results;
+        _canRetrySearch = false;
       });
     } on AirQualityApiException catch (error) {
       if (!mounted) return;
 
       setState(() {
         _searchError = error.message;
+        _canRetrySearch = true;
       });
     } on FormatException {
       if (!mounted) return;
 
       setState(() {
         _searchError = 'Format data lokasi dari server tidak valid.';
+
+        _canRetrySearch = true;
       });
     } catch (_) {
       if (!mounted) return;
 
       setState(() {
         _searchError = 'Terjadi kesalahan saat mencari lokasi.';
+
+        _canRetrySearch = true;
       });
     } finally {
       if (mounted) {
@@ -104,6 +116,16 @@ class _HomePageState extends State<HomePage> {
 
       _searchError = null;
       _hasSearched = false;
+    });
+  }
+
+  void _retryAirQuality() {
+    final location = _selectedCity;
+
+    if (location == null) return;
+
+    setState(() {
+      _airQualityFuture = _apiService.fetchAirQuality(location);
     });
   }
 
@@ -165,11 +187,19 @@ class _HomePageState extends State<HomePage> {
 
               if (_searchError != null) ...[
                 const SizedBox(height: 20),
-                _buildMessageCard(
-                  icon: Icons.error_outline_rounded,
-                  message: _searchError!,
-                  color: colorScheme.error,
-                ),
+
+                if (_canRetrySearch)
+                  AirQualityErrorCard(
+                    title: 'Pencarian gagal',
+                    message: _searchError!,
+                    onRetry: _searchCities,
+                  )
+                else
+                  _buildMessageCard(
+                    icon: Icons.error_outline_rounded,
+                    message: _searchError!,
+                    color: colorScheme.error,
+                  ),
               ],
 
               if (_searchResults.isNotEmpty) ...[
@@ -361,8 +391,8 @@ class _HomePageState extends State<HomePage> {
 
     return FutureBuilder<AirQualityData>(
       future: future,
-
       builder: (context, snapshot) {
+        // LOADING STATE
         if (snapshot.connectionState == ConnectionState.waiting) {
           return Card(
             elevation: 0,
@@ -386,28 +416,43 @@ class _HomePageState extends State<HomePage> {
           );
         }
 
+        // ERROR STATE
         if (snapshot.hasError) {
           final error = snapshot.error;
 
-          final message = error is AirQualityApiException
-              ? error.message
-              : 'Gagal mengambil data kualitas udara.';
+          String message;
 
-          return _buildMessageCard(
-            icon: Icons.cloud_off_rounded,
+          if (error is AirQualityApiException) {
+            message = error.message;
+          } else if (error is FormatException) {
+            message =
+                'Format respons dari server tidak valid. '
+                'Silakan coba kembali.';
+          } else {
+            message =
+                'Gagal mengambil data kualitas udara. '
+                'Periksa koneksi internet dan coba kembali.';
+          }
+
+          return AirQualityErrorCard(
+            title: 'Gagal memuat kualitas udara',
             message: message,
-            color: Theme.of(context).colorScheme.error,
+            onRetry: _retryAirQuality,
           );
         }
 
+        // SUCCESS STATE
         if (snapshot.hasData) {
           return AirQualitySummaryCard(data: snapshot.data!);
         }
 
-        return _buildMessageCard(
-          icon: Icons.info_outline_rounded,
-          message: 'Data kualitas udara belum tersedia.',
-          color: Theme.of(context).colorScheme.onSurfaceVariant,
+        // EMPTY STATE
+        return AirQualityErrorCard(
+          title: 'Data tidak tersedia',
+          message:
+              'Belum ada informasi kualitas udara untuk '
+              'lokasi ini. Silakan coba kembali.',
+          onRetry: _retryAirQuality,
         );
       },
     );
