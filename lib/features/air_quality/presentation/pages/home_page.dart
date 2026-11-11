@@ -12,6 +12,8 @@ import 'package:airscope/features/air_quality/domain/models/air_quality_data.dar
 import '../widgets/air_quality_summary_card.dart';
 import '../widgets/air_quality_error_card.dart';
 
+import 'package:airscope/features/air_quality/data/services/local_storage_service.dart';
+
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
 
@@ -24,6 +26,10 @@ class _HomePageState extends State<HomePage> {
 
   final AirQualityApiService _apiService = AirQualityApiService();
 
+  final LocalStorageService _storageService = LocalStorageService();
+
+  bool _isRestoringCity = true;
+
   List<CityLocation> _searchResults = [];
 
   CityLocation? _selectedCity;
@@ -35,6 +41,46 @@ class _HomePageState extends State<HomePage> {
   bool _canRetrySearch = false;
 
   String? _searchError;
+
+  @override
+  void initState() {
+    super.initState();
+
+    _restoreLastSelectedCity();
+  }
+
+  /// Memulihkan lokasi terakhir ketika aplikasi dibuka.
+  Future<void> _restoreLastSelectedCity() async {
+    try {
+      final location = await _storageService.getSelectedCity();
+
+      if (!mounted) return;
+
+      if (location != null) {
+        final future = _apiService.fetchAirQuality(location);
+
+        setState(() {
+          _selectedCity = location;
+          _searchController.text = location.name;
+          _airQualityFuture = future;
+        });
+      }
+    } catch (_) {
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Lokasi terakhir tidak dapat dipulihkan.'),
+        ),
+      );
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isRestoringCity = false;
+        });
+      }
+    }
+  }
 
   Future<void> _searchCities() async {
     final query = _searchController.text.trim();
@@ -116,7 +162,25 @@ class _HomePageState extends State<HomePage> {
 
       _searchError = null;
       _hasSearched = false;
+      _canRetrySearch = false;
     });
+
+    _saveSelectedCity(location);
+  }
+
+  /// Menyimpan lokasi yang baru dipilih.
+  Future<void> _saveSelectedCity(CityLocation location) async {
+    try {
+      await _storageService.saveSelectedCity(location);
+    } catch (_) {
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Lokasi berhasil dipilih, tetapi gagal disimpan.'),
+        ),
+      );
+    }
   }
 
   void _retryAirQuality() {
@@ -236,6 +300,22 @@ class _HomePageState extends State<HomePage> {
                       'Kota tidak ditemukan. '
                       'Coba gunakan nama kota lainnya.',
                   color: colorScheme.onSurfaceVariant,
+                ),
+              ],
+
+              if (_isRestoringCity) ...[
+                const SizedBox(height: 36),
+
+                const Center(
+                  child: Column(
+                    children: [
+                      CircularProgressIndicator(),
+
+                      SizedBox(height: 16),
+
+                      Text('Memulihkan lokasi terakhir...'),
+                    ],
+                  ),
                 ),
               ],
 

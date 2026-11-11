@@ -39,6 +39,16 @@ class CityLocation {
     );
   }
 
+  Map<String, dynamic> toJson() {
+    return {
+      'name': name,
+      'country': country,
+      'admin1': admin1,
+      'latitude': latitude,
+      'longitude': longitude,
+    };
+  }
+
   String get displayName {
     return [name, ?admin1, ?country].join(', ');
   }
