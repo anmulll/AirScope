@@ -7,6 +7,10 @@ import 'package:airscope/features/air_quality/domain/models/city_location.dart';
 import '../widgets/city_search_field.dart';
 import '../widgets/city_search_result_tile.dart';
 
+import 'package:airscope/features/air_quality/domain/models/air_quality_data.dart';
+
+import '../widgets/air_quality_summary_card.dart';
+
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
 
@@ -22,6 +26,8 @@ class _HomePageState extends State<HomePage> {
   List<CityLocation> _searchResults = [];
 
   CityLocation? _selectedCity;
+
+  Future<AirQualityData>? _airQualityFuture;
 
   bool _isSearching = false;
   bool _hasSearched = false;
@@ -48,6 +54,7 @@ class _HomePageState extends State<HomePage> {
       _searchError = null;
       _searchResults = [];
       _selectedCity = null;
+      _airQualityFuture = null;
     });
 
     try {
@@ -86,10 +93,15 @@ class _HomePageState extends State<HomePage> {
   }
 
   void _selectCity(CityLocation location) {
+    final future = _apiService.fetchAirQuality(location);
+
     setState(() {
       _selectedCity = location;
+      _airQualityFuture = future;
+
       _searchResults = [];
       _searchController.text = location.name;
+
       _searchError = null;
       _hasSearched = false;
     });
@@ -199,7 +211,12 @@ class _HomePageState extends State<HomePage> {
 
               if (_selectedCity != null) ...[
                 const SizedBox(height: 28),
+
                 _buildSelectedCityCard(_selectedCity!, colorScheme, textTheme),
+
+                const SizedBox(height: 16),
+
+                _buildAirQualitySection(),
               ],
 
               if (!_hasSearched &&
@@ -332,6 +349,67 @@ class _HomePageState extends State<HomePage> {
           ),
         ],
       ),
+    );
+  }
+
+  Widget _buildAirQualitySection() {
+    final future = _airQualityFuture;
+
+    if (future == null) {
+      return const SizedBox.shrink();
+    }
+
+    return FutureBuilder<AirQualityData>(
+      future: future,
+
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return Card(
+            elevation: 0,
+            margin: EdgeInsets.zero,
+            child: Padding(
+              padding: const EdgeInsets.all(24),
+              child: Column(
+                children: [
+                  const CircularProgressIndicator(),
+
+                  const SizedBox(height: 16),
+
+                  Text(
+                    'Mengambil data kualitas udara...',
+                    style: Theme.of(context).textTheme.bodyMedium,
+                    textAlign: TextAlign.center,
+                  ),
+                ],
+              ),
+            ),
+          );
+        }
+
+        if (snapshot.hasError) {
+          final error = snapshot.error;
+
+          final message = error is AirQualityApiException
+              ? error.message
+              : 'Gagal mengambil data kualitas udara.';
+
+          return _buildMessageCard(
+            icon: Icons.cloud_off_rounded,
+            message: message,
+            color: Theme.of(context).colorScheme.error,
+          );
+        }
+
+        if (snapshot.hasData) {
+          return AirQualitySummaryCard(data: snapshot.data!);
+        }
+
+        return _buildMessageCard(
+          icon: Icons.info_outline_rounded,
+          message: 'Data kualitas udara belum tersedia.',
+          color: Theme.of(context).colorScheme.onSurfaceVariant,
+        );
+      },
     );
   }
 }
