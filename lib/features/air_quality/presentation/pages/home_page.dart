@@ -55,6 +55,15 @@ class _HomePageState extends State<HomePage> {
 
   Future<AirQualityData>? _airQualityFuture;
 
+  // Data kualitas udara terakhir yang berhasil diterima.
+  AirQualityData? _latestAirQualityData;
+
+  // Status pembaruan data.
+  bool _isRefreshing = false;
+
+  // Pesan error ketika proses refresh gagal.
+  String? _refreshError;
+
   String? _searchError;
 
   // ============================================================
@@ -86,19 +95,29 @@ class _HomePageState extends State<HomePage> {
   ///
   /// Future asli tetap dikembalikan sehingga FutureBuilder masih
   /// dapat membaca snapshot.hasError dan snapshot.error.
+
   Future<AirQualityData> _requestAirQuality(CityLocation location) {
-    // PENTING:
-    // Panggil API Service secara langsung.
-    // Jangan memanggil _requestAirQuality() di dalam fungsi ini.
     final future = _apiService.fetchAirQuality(location);
 
-    // Pasang error handler tambahan.
-    // Error tetap tersedia pada Future asli untuk FutureBuilder.
+    // Menyimpan data terbaru ketika request berhasil.
     unawaited(
-      future.then<void>(
-        (_) {},
-        onError: (Object error, StackTrace stackTrace) {},
-      ),
+      future.then<void>((data) {
+        if (!mounted) return;
+
+        final selected = _selectedCity;
+
+        // Abaikan respons dari lokasi yang sudah tidak dipilih.
+        if (selected == null ||
+            selected.latitude != location.latitude ||
+            selected.longitude != location.longitude) {
+          return;
+        }
+
+        setState(() {
+          _latestAirQualityData = data;
+          _refreshError = null;
+        });
+      }, onError: (Object error, StackTrace stackTrace) {}),
     );
 
     return future;
@@ -181,6 +200,12 @@ class _HomePageState extends State<HomePage> {
       _airQualityFuture = null;
 
       _canRetrySearch = false;
+
+      _latestAirQualityData = null;
+
+      _isRefreshing = false;
+
+      _refreshError = null;
     });
 
     try {
@@ -248,6 +273,12 @@ class _HomePageState extends State<HomePage> {
       _hasSearched = false;
 
       _canRetrySearch = false;
+
+      _latestAirQualityData = null;
+
+      _isRefreshing = false;
+
+      _refreshError = null;
     });
 
     _saveSelectedCity(location);
@@ -280,10 +311,82 @@ class _HomePageState extends State<HomePage> {
 
     if (location == null) return;
 
+    // Jika sudah memiliki data sebelumnya,
+    // gunakan mekanisme refresh tanpa menghapus data.
+    if (_latestAirQualityData != null) {
+      _refreshAirQuality();
+      return;
+    }
+
+    // Jika belum memiliki data, ulangi request awal.
     setState(() {
-      // Memulai request baru menggunakan API Service.
       _airQualityFuture = _requestAirQuality(location);
     });
+  }
+
+  // ============================================================
+  // MANUAL REFRESH AIR QUALITY
+  // ============================================================
+
+  Future<void> _refreshAirQuality() async {
+    final location = _selectedCity;
+
+    if (location == null || _isRefreshing) return;
+
+    setState(() {
+      _isRefreshing = true;
+      _refreshError = null;
+    });
+
+    try {
+      // Mengambil data terbaru dari API.
+      final data = await _apiService.fetchAirQuality(location);
+
+      if (!mounted) return;
+
+      // Mengabaikan respons jika pengguna sudah memilih lokasi lain.
+      if (_selectedCity?.latitude != location.latitude ||
+          _selectedCity?.longitude != location.longitude) {
+        return;
+      }
+
+      setState(() {
+        _latestAirQualityData = data;
+        _airQualityFuture = Future<AirQualityData>.value(data);
+      });
+    } catch (error) {
+      if (!mounted) return;
+
+      if (_selectedCity?.latitude != location.latitude ||
+          _selectedCity?.longitude != location.longitude) {
+        return;
+      }
+
+      String message;
+
+      if (error is AirQualityApiException) {
+        message = error.message;
+      } else if (error is FormatException) {
+        message = 'Format respons dari server tidak valid.';
+      } else {
+        message =
+            'Gagal memperbarui kualitas udara. '
+            'Periksa koneksi internet dan coba kembali.';
+      }
+
+      setState(() {
+        // Data lama tidak dihapus ketika refresh gagal.
+        _refreshError = message;
+      });
+    } finally {
+      if (mounted &&
+          _selectedCity?.latitude == location.latitude &&
+          _selectedCity?.longitude == location.longitude) {
+        setState(() {
+          _isRefreshing = false;
+        });
+      }
+    }
   }
 
   // ============================================================
@@ -319,6 +422,22 @@ class _HomePageState extends State<HomePage> {
           style: TextStyle(fontWeight: FontWeight.w700),
         ),
         backgroundColor: colorScheme.surface,
+        actions: [
+          if (_selectedCity != null)
+            IconButton(
+              tooltip: 'Perbarui kualitas udara',
+              onPressed: _latestAirQualityData == null || _isRefreshing
+                  ? null
+                  : _refreshAirQuality,
+              icon: _isRefreshing
+                  ? const SizedBox(
+                      width: 20,
+                      height: 20,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Icon(Icons.refresh_rounded),
+            ),
+        ],
       ),
 
       body: SafeArea(
@@ -637,6 +756,53 @@ class _HomePageState extends State<HomePage> {
   // ============================================================
 
   Widget _buildAirQualitySection() {
+    // ==========================================================
+    // CACHED DATA
+    // ==========================================================
+
+    final latestData = _latestAirQualityData;
+
+    if (latestData != null) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          // Indikator pembaruan tanpa menghilangkan data lama.
+          if (_isRefreshing) ...[
+            const LinearProgressIndicator(),
+
+            const SizedBox(height: 8),
+
+            const Text(
+              'Memperbarui data kualitas udara...',
+              textAlign: TextAlign.center,
+            ),
+
+            const SizedBox(height: 12),
+          ],
+
+          // Dashboard tetap menampilkan data terakhir.
+          AirQualitySummaryCard(data: latestData),
+
+          // Error refresh ditampilkan di bawah dashboard.
+          if (_refreshError != null) ...[
+            const SizedBox(height: 12),
+
+            AirQualityErrorCard(
+              title: 'Pembaruan data gagal',
+              message:
+                  '$_refreshError\n'
+                  'Data sebelumnya tetap ditampilkan.',
+              onRetry: _refreshAirQuality,
+            ),
+          ],
+        ],
+      );
+    }
+
+    // ==========================================================
+    // INITIAL REQUEST
+    // ==========================================================
+
     final future = _airQualityFuture;
 
     if (future == null) {
@@ -645,7 +811,6 @@ class _HomePageState extends State<HomePage> {
 
     return FutureBuilder<AirQualityData>(
       future: future,
-
       builder: (context, snapshot) {
         // ------------------------------------------------------
         // LOADING STATE
@@ -654,12 +819,9 @@ class _HomePageState extends State<HomePage> {
         if (snapshot.connectionState == ConnectionState.waiting) {
           return Card(
             elevation: 0,
-
             margin: EdgeInsets.zero,
-
             child: Padding(
               padding: const EdgeInsets.all(24),
-
               child: Column(
                 children: [
                   const CircularProgressIndicator(),
