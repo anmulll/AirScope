@@ -1,50 +1,61 @@
 import 'package:flutter/material.dart';
 
-import '../../domain/models/city_location.dart';
-
-class CitySearchResultTile extends StatelessWidget {
-  const CitySearchResultTile({
+class CitySearchField extends StatelessWidget {
+  const CitySearchField({
     super.key,
-    required this.location,
-    required this.onTap,
+    required this.controller,
+    required this.onSearch,
+    this.isLoading = false,
   });
 
-  final CityLocation location;
-  final VoidCallback onTap;
+  final TextEditingController controller;
+  final VoidCallback onSearch;
+  final bool isLoading;
 
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
 
-    final details = [
-      location.admin1,
-      location.country,
-    ].whereType<String>().join(', ');
-
-    return Card(
-      margin: EdgeInsets.zero,
-      elevation: 0,
-      color: colorScheme.surface,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(14),
-        side: BorderSide(color: colorScheme.outlineVariant),
-      ),
-      child: ListTile(
-        onTap: onTap,
-        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-        leading: CircleAvatar(
-          backgroundColor: colorScheme.primaryContainer,
-          child: Icon(
-            Icons.location_city_rounded,
-            color: colorScheme.onPrimaryContainer,
-          ),
+    return TextField(
+      controller: controller,
+      textInputAction: TextInputAction.search,
+      onSubmitted: (_) {
+        if (!isLoading) {
+          onSearch();
+        }
+      },
+      decoration: InputDecoration(
+        hintText: 'Contoh: Makassar',
+        prefixIcon: const Icon(Icons.search_rounded),
+        suffixIcon: IconButton(
+          tooltip: 'Cari kota',
+          onPressed: isLoading ? null : onSearch,
+          icon: isLoading
+              ? const SizedBox(
+                  width: 20,
+                  height: 20,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              : const Icon(Icons.arrow_forward_rounded),
         ),
-        title: Text(
-          location.name,
-          style: const TextStyle(fontWeight: FontWeight.w600),
+        filled: true,
+        fillColor: colorScheme.surface,
+        contentPadding: const EdgeInsets.symmetric(
+          horizontal: 16,
+          vertical: 18,
         ),
-        subtitle: Text(details.isEmpty ? 'Koordinat tersedia' : details),
-        trailing: const Icon(Icons.chevron_right_rounded),
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(16),
+          borderSide: BorderSide.none,
+        ),
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(16),
+          borderSide: BorderSide(color: colorScheme.outlineVariant),
+        ),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(16),
+          borderSide: BorderSide(color: colorScheme.primary, width: 1.5),
+        ),
       ),
     );
   }

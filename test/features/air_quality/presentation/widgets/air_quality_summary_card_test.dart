@@ -37,4 +37,32 @@ void main() {
 
     expect(find.text('US Air Quality Index (AQI)'), findsOneWidget);
   });
+
+  testWidgets('displays unavailable values when AQI data is missing', (
+    WidgetTester tester,
+  ) async {
+    const data = AirQualityData(
+      cityName: 'Makassar',
+      latitude: -5.1477,
+      longitude: 119.4327,
+      usAqi: null,
+      pm25: null,
+      pm10: null,
+      measuredAt: null,
+    );
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: SingleChildScrollView(child: AirQualitySummaryCard(data: data)),
+        ),
+      ),
+    );
+
+    expect(find.text('—'), findsNWidgets(3));
+
+    expect(find.text('Tidak Tersedia'), findsOneWidget);
+
+    expect(find.text('Waktu data: Waktu data tidak tersedia'), findsOneWidget);
+  });
 }

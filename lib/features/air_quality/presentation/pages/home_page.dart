@@ -1,34 +1,53 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import 'package:airscope/features/air_quality/data/services/air_quality_api_exception.dart';
 import 'package:airscope/features/air_quality/data/services/air_quality_api_service.dart';
+import 'package:airscope/features/air_quality/data/services/local_storage_service.dart';
+
+import 'package:airscope/features/air_quality/domain/models/air_quality_data.dart';
 import 'package:airscope/features/air_quality/domain/models/city_location.dart';
 
+import '../widgets/air_quality_error_card.dart';
+import '../widgets/air_quality_summary_card.dart';
 import '../widgets/city_search_field.dart';
 import '../widgets/city_search_result_tile.dart';
 
-import 'package:airscope/features/air_quality/domain/models/air_quality_data.dart';
-
-import '../widgets/air_quality_summary_card.dart';
-import '../widgets/air_quality_error_card.dart';
-
-import 'package:airscope/features/air_quality/data/services/local_storage_service.dart';
-
 class HomePage extends StatefulWidget {
-  const HomePage({super.key});
+  const HomePage({super.key, this.apiService, this.storageService});
+
+  final AirQualityApiService? apiService;
+  final LocalStorageService? storageService;
 
   @override
   State<HomePage> createState() => _HomePageState();
 }
 
 class _HomePageState extends State<HomePage> {
+  // ============================================================
+  // DEPENDENCIES
+  // ============================================================
+
   final TextEditingController _searchController = TextEditingController();
 
-  final AirQualityApiService _apiService = AirQualityApiService();
+  late final AirQualityApiService _apiService;
 
-  final LocalStorageService _storageService = LocalStorageService();
+  late final LocalStorageService _storageService;
+
+  late final bool _ownsApiService;
+
+  // ============================================================
+  // STATE VARIABLES
+  // ============================================================
 
   bool _isRestoringCity = true;
+
+  bool _isSearching = false;
+
+  bool _hasSearched = false;
+
+  bool _canRetrySearch = false;
 
   List<CityLocation> _searchResults = [];
 
@@ -36,18 +55,58 @@ class _HomePageState extends State<HomePage> {
 
   Future<AirQualityData>? _airQualityFuture;
 
-  bool _isSearching = false;
-  bool _hasSearched = false;
-  bool _canRetrySearch = false;
-
   String? _searchError;
+
+  // ============================================================
+  // INITIALIZATION
+  // ============================================================
 
   @override
   void initState() {
     super.initState();
 
+    _ownsApiService = widget.apiService == null;
+
+    _apiService = widget.apiService ?? AirQualityApiService();
+
+    _storageService = widget.storageService ?? LocalStorageService();
+
     _restoreLastSelectedCity();
   }
+
+  // ============================================================
+  // AIR QUALITY REQUEST
+  // ============================================================
+
+  /// Membuat request kualitas udara.
+  ///
+  /// Error handler dipasang segera agar Future tidak menghasilkan
+  /// unhandled asynchronous error sebelum FutureBuilder menerima
+  /// Future tersebut.
+  ///
+  /// Future asli tetap dikembalikan sehingga FutureBuilder masih
+  /// dapat membaca snapshot.hasError dan snapshot.error.
+  Future<AirQualityData> _requestAirQuality(CityLocation location) {
+    // PENTING:
+    // Panggil API Service secara langsung.
+    // Jangan memanggil _requestAirQuality() di dalam fungsi ini.
+    final future = _apiService.fetchAirQuality(location);
+
+    // Pasang error handler tambahan.
+    // Error tetap tersedia pada Future asli untuk FutureBuilder.
+    unawaited(
+      future.then<void>(
+        (_) {},
+        onError: (Object error, StackTrace stackTrace) {},
+      ),
+    );
+
+    return future;
+  }
+
+  // ============================================================
+  // RESTORE LAST SELECTED CITY
+  // ============================================================
 
   /// Memulihkan lokasi terakhir ketika aplikasi dibuka.
   Future<void> _restoreLastSelectedCity() async {
@@ -57,11 +116,13 @@ class _HomePageState extends State<HomePage> {
       if (!mounted) return;
 
       if (location != null) {
-        final future = _apiService.fetchAirQuality(location);
+        final future = _requestAirQuality(location);
 
         setState(() {
           _selectedCity = location;
+
           _searchController.text = location.name;
+
           _airQualityFuture = future;
         });
       }
@@ -82,15 +143,22 @@ class _HomePageState extends State<HomePage> {
     }
   }
 
+  // ============================================================
+  // SEARCH CITY
+  // ============================================================
+
   Future<void> _searchCities() async {
     final query = _searchController.text.trim();
 
+    // Validasi input pencarian.
     if (query.length < 2) {
       setState(() {
         _searchError = 'Masukkan minimal 2 karakter untuk mencari kota.';
 
         _searchResults = [];
+
         _hasSearched = false;
+
         _canRetrySearch = false;
       });
 
@@ -101,11 +169,17 @@ class _HomePageState extends State<HomePage> {
 
     setState(() {
       _isSearching = true;
+
       _hasSearched = true;
+
       _searchError = null;
+
       _searchResults = [];
+
       _selectedCity = null;
+
       _airQualityFuture = null;
+
       _canRetrySearch = false;
     });
 
@@ -116,6 +190,7 @@ class _HomePageState extends State<HomePage> {
 
       setState(() {
         _searchResults = results;
+
         _canRetrySearch = false;
       });
     } on AirQualityApiException catch (error) {
@@ -123,6 +198,7 @@ class _HomePageState extends State<HomePage> {
 
       setState(() {
         _searchError = error.message;
+
         _canRetrySearch = true;
       });
     } on FormatException {
@@ -150,25 +226,37 @@ class _HomePageState extends State<HomePage> {
     }
   }
 
+  // ============================================================
+  // SELECT CITY
+  // ============================================================
+
   void _selectCity(CityLocation location) {
-    final future = _apiService.fetchAirQuality(location);
+    // Request melalui helper yang sudah memiliki error handler.
+    final future = _requestAirQuality(location);
 
     setState(() {
       _selectedCity = location;
+
       _airQualityFuture = future;
 
       _searchResults = [];
+
       _searchController.text = location.name;
 
       _searchError = null;
+
       _hasSearched = false;
+
       _canRetrySearch = false;
     });
 
     _saveSelectedCity(location);
   }
 
-  /// Menyimpan lokasi yang baru dipilih.
+  // ============================================================
+  // SAVE SELECTED CITY
+  // ============================================================
+
   Future<void> _saveSelectedCity(CityLocation location) async {
     try {
       await _storageService.saveSelectedCity(location);
@@ -183,26 +271,45 @@ class _HomePageState extends State<HomePage> {
     }
   }
 
+  // ============================================================
+  // RETRY AIR QUALITY REQUEST
+  // ============================================================
+
   void _retryAirQuality() {
     final location = _selectedCity;
 
     if (location == null) return;
 
     setState(() {
-      _airQualityFuture = _apiService.fetchAirQuality(location);
+      // Memulai request baru menggunakan API Service.
+      _airQualityFuture = _requestAirQuality(location);
     });
   }
+
+  // ============================================================
+  // DISPOSE
+  // ============================================================
 
   @override
   void dispose() {
     _searchController.dispose();
-    _apiService.close();
+
+    // Hanya menutup API Service yang dibuat oleh HomePage.
+    if (_ownsApiService) {
+      _apiService.close();
+    }
+
     super.dispose();
   }
+
+  // ============================================================
+  // BUILD MAIN PAGE
+  // ============================================================
 
   @override
   Widget build(BuildContext context) {
     final textTheme = Theme.of(context).textTheme;
+
     final colorScheme = Theme.of(context).colorScheme;
 
     return Scaffold(
@@ -213,14 +320,23 @@ class _HomePageState extends State<HomePage> {
         ),
         backgroundColor: colorScheme.surface,
       ),
+
       body: SafeArea(
         child: SingleChildScrollView(
           padding: const EdgeInsets.all(20),
+
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
+
             children: [
+              // --------------------------------------------------
+              // HEADER
+              // --------------------------------------------------
+
               Text('Pantau kualitas udara', style: textTheme.headlineSmall),
+
               const SizedBox(height: 8),
+
               Text(
                 'Cari kota untuk mengetahui informasi '
                 'kualitas udara di lokasi tersebut.',
@@ -229,6 +345,9 @@ class _HomePageState extends State<HomePage> {
 
               const SizedBox(height: 28),
 
+              // --------------------------------------------------
+              // SEARCH FIELD
+              // --------------------------------------------------
               Text(
                 'Nama kota',
                 style: textTheme.titleMedium?.copyWith(
@@ -246,9 +365,13 @@ class _HomePageState extends State<HomePage> {
 
               if (_isSearching) ...[
                 const SizedBox(height: 16),
+
                 const LinearProgressIndicator(),
               ],
 
+              // --------------------------------------------------
+              // SEARCH ERROR
+              // --------------------------------------------------
               if (_searchError != null) ...[
                 const SizedBox(height: 20),
 
@@ -266,6 +389,9 @@ class _HomePageState extends State<HomePage> {
                   ),
               ],
 
+              // --------------------------------------------------
+              // SEARCH RESULTS
+              // --------------------------------------------------
               if (_searchResults.isNotEmpty) ...[
                 const SizedBox(height: 28),
 
@@ -281,6 +407,7 @@ class _HomePageState extends State<HomePage> {
                 ..._searchResults.map(
                   (location) => Padding(
                     padding: const EdgeInsets.only(bottom: 10),
+
                     child: CitySearchResultTile(
                       location: location,
                       onTap: () => _selectCity(location),
@@ -289,11 +416,15 @@ class _HomePageState extends State<HomePage> {
                 ),
               ],
 
+              // --------------------------------------------------
+              // EMPTY SEARCH RESULT
+              // --------------------------------------------------
               if (_hasSearched &&
                   !_isSearching &&
                   _searchResults.isEmpty &&
                   _searchError == null) ...[
                 const SizedBox(height: 24),
+
                 _buildMessageCard(
                   icon: Icons.location_off_outlined,
                   message:
@@ -303,6 +434,9 @@ class _HomePageState extends State<HomePage> {
                 ),
               ],
 
+              // --------------------------------------------------
+              // RESTORING LAST CITY
+              // --------------------------------------------------
               if (_isRestoringCity) ...[
                 const SizedBox(height: 36),
 
@@ -319,6 +453,9 @@ class _HomePageState extends State<HomePage> {
                 ),
               ],
 
+              // --------------------------------------------------
+              // SELECTED CITY
+              // --------------------------------------------------
               if (_selectedCity != null) ...[
                 const SizedBox(height: 28),
 
@@ -329,10 +466,14 @@ class _HomePageState extends State<HomePage> {
                 _buildAirQualitySection(),
               ],
 
+              // --------------------------------------------------
+              // INITIAL EMPTY STATE
+              // --------------------------------------------------
               if (!_hasSearched &&
                   _selectedCity == null &&
                   _searchError == null) ...[
                 const SizedBox(height: 36),
+
                 Center(
                   child: Column(
                     children: [
@@ -341,14 +482,18 @@ class _HomePageState extends State<HomePage> {
                         size: 64,
                         color: colorScheme.primary,
                       ),
+
                       const SizedBox(height: 16),
+
                       Text(
                         'Mulai pencarian lokasi',
                         style: textTheme.titleMedium?.copyWith(
                           fontWeight: FontWeight.w600,
                         ),
                       ),
+
                       const SizedBox(height: 8),
+
                       Text(
                         'Masukkan nama kota untuk menemukan '
                         'lokasi yang ingin dipantau.',
@@ -360,6 +505,9 @@ class _HomePageState extends State<HomePage> {
                 ),
               ],
 
+              // --------------------------------------------------
+              // FOOTER
+              // --------------------------------------------------
               const SizedBox(height: 32),
 
               Center(
@@ -378,6 +526,10 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
+  // ============================================================
+  // MESSAGE CARD
+  // ============================================================
+
   Widget _buildMessageCard({
     required IconData icon,
     required String message,
@@ -385,16 +537,23 @@ class _HomePageState extends State<HomePage> {
   }) {
     return Container(
       width: double.infinity,
+
       padding: const EdgeInsets.all(16),
+
       decoration: BoxDecoration(
         color: color.withValues(alpha: 0.08),
+
         borderRadius: BorderRadius.circular(14),
       ),
+
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
+
         children: [
           Icon(icon, color: color),
+
           const SizedBox(width: 12),
+
           Expanded(
             child: Text(message, style: TextStyle(color: color)),
           ),
@@ -403,6 +562,10 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
+  // ============================================================
+  // SELECTED CITY CARD
+  // ============================================================
+
   Widget _buildSelectedCityCard(
     CityLocation location,
     ColorScheme colorScheme,
@@ -410,19 +573,27 @@ class _HomePageState extends State<HomePage> {
   ) {
     return Container(
       width: double.infinity,
+
       padding: const EdgeInsets.all(18),
+
       decoration: BoxDecoration(
         color: colorScheme.primaryContainer.withValues(alpha: 0.35),
+
         borderRadius: BorderRadius.circular(18),
+
         border: Border.all(color: colorScheme.primary.withValues(alpha: 0.2)),
       ),
+
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
+
         children: [
           Row(
             children: [
               Icon(Icons.check_circle_rounded, color: colorScheme.primary),
+
               const SizedBox(width: 8),
+
               Text(
                 'Lokasi berhasil dipilih',
                 style: textTheme.titleSmall?.copyWith(
@@ -452,15 +623,18 @@ class _HomePageState extends State<HomePage> {
           const SizedBox(height: 12),
 
           Text(
-            'Lokasi telah dipilih. Pengambilan data '
-            'kualitas udara akan diimplementasikan '
-            'pada tahap berikutnya.',
+            'Data kualitas udara untuk lokasi ini '
+            'ditampilkan pada bagian berikutnya.',
             style: textTheme.bodySmall,
           ),
         ],
       ),
     );
   }
+
+  // ============================================================
+  // AIR QUALITY SECTION
+  // ============================================================
 
   Widget _buildAirQualitySection() {
     final future = _airQualityFuture;
@@ -471,14 +645,21 @@ class _HomePageState extends State<HomePage> {
 
     return FutureBuilder<AirQualityData>(
       future: future,
+
       builder: (context, snapshot) {
+        // ------------------------------------------------------
         // LOADING STATE
+        // ------------------------------------------------------
+
         if (snapshot.connectionState == ConnectionState.waiting) {
           return Card(
             elevation: 0,
+
             margin: EdgeInsets.zero,
+
             child: Padding(
               padding: const EdgeInsets.all(24),
+
               child: Column(
                 children: [
                   const CircularProgressIndicator(),
@@ -496,7 +677,10 @@ class _HomePageState extends State<HomePage> {
           );
         }
 
+        // ------------------------------------------------------
         // ERROR STATE
+        // ------------------------------------------------------
+
         if (snapshot.hasError) {
           final error = snapshot.error;
 
@@ -521,12 +705,18 @@ class _HomePageState extends State<HomePage> {
           );
         }
 
+        // ------------------------------------------------------
         // SUCCESS STATE
+        // ------------------------------------------------------
+
         if (snapshot.hasData) {
           return AirQualitySummaryCard(data: snapshot.data!);
         }
 
+        // ------------------------------------------------------
         // EMPTY STATE
+        // ------------------------------------------------------
+
         return AirQualityErrorCard(
           title: 'Data tidak tersedia',
           message:
